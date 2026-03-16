@@ -7222,3 +7222,11 @@ prisma:query DELETE FROM `main`.`SurveyResponse` WHERE (`main`.`SurveyResponse`.
  GET /api/survey?sessionId=20a414c5-546c-498b-b50a-202ef2adfd36 200 in 8ms (compile: 1566µs, render: 6ms)
 prisma:query SELECT 1
 prisma:query SELECT `main`.`SurveyResponse`.`id`, `main`.`SurveyResponse`.`sessionId`, `main`.`SurveyResponse`.`completed`, `main`.`SurveyResponse`.`createdAt`, `main`.`SurveyResponse`.`updatedAt` FROM `main`.`SurveyResponse` WHERE (`main`.`SurveyResponse`.`sessionId` = ? AND 1=1) LIMIT ? OFFSET ?
+ GET / 200 in 33ms (compile: 10ms, render: 23ms)
+prisma:query SELECT 1
+prisma:query SELECT `main`.`SurveyResponse`.`id`, `main`.`SurveyResponse`.`sessionId`, `main`.`SurveyResponse`.`completed`, `main`.`SurveyResponse`.`createdAt`, `main`.`SurveyResponse`.`updatedAt` FROM `main`.`SurveyResponse` WHERE (`main`.`SurveyResponse`.`sessionId` = ? AND 1=1) LIMIT ? OFFSET ?
+ GET /api/survey?sessionId=20a414c5-546c-498b-b50a-202ef2adfd36 200 in 10ms (compile: 5ms, render: 5ms)
+ GET / 200 in 32ms (compile: 7ms, render: 25ms)
+prisma:query SELECT 1
+prisma:query SELECT `main`.`SurveyResponse`.`id`, `main`.`SurveyResponse`.`sessionId`, `main`.`SurveyResponse`.`completed`, `main`.`SurveyResponse`.`createdAt`, `main`.`SurveyResponse`.`updatedAt` FROM `main`.`SurveyResponse` WHERE (`main`.`SurveyResponse`.`sessionId` = ? AND 1=1) LIMIT ? OFFSET ?
+ GET /api/survey?sessionId=20a414c5-546c-498b-b50a-202ef2adfd36 200 in 5ms (compile: 1724µs, render: 4ms)
