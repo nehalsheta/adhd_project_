@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { 
   SYMPTOMS, SURVEY_CATEGORIES, FREQUENCY_OPTIONS, IMPACT_AREAS, DURATION_OPTIONS,
   type Symptom, getSymptomsByCategory, calculateSymptomScore, getMaxScoreForCategory,
@@ -26,6 +27,13 @@ interface SymptomAnswer {
   frequency: string;
   impactAreas: string[];
   duration: string;
+}
+
+interface UserData {
+  name?: string;
+  address?: string;
+  age: number;
+  gender: 'male' | 'female';
 }
 
 interface CategoryResult {
@@ -50,9 +58,12 @@ export default function ADHDSurvey() {
 
   const [currentSymptomIndex, setCurrentSymptomIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, SymptomAnswer>>({});
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showUserForm, setShowUserForm] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   const currentSymptom = SYMPTOMS[currentSymptomIndex];
   const currentCategory = SURVEY_CATEGORIES[currentSymptom.category];
@@ -64,16 +75,24 @@ export default function ADHDSurvey() {
       try {
         const res = await fetch(`/api/survey?sessionId=${sessionId}`);
         const data = await res.json();
-        if (data.exists && data.answers) {
-          const loadedAnswers: Record<string, SymptomAnswer> = {};
-          data.answers.forEach((a: { symptomId: string; frequency: string; impactAreas: string[]; duration: string }) => {
-            loadedAnswers[a.symptomId] = {
-              frequency: a.frequency,
-              impactAreas: a.impactAreas,
-              duration: a.duration,
-            };
-          });
-          setAnswers(loadedAnswers);
+        if (data.exists) {
+          if (data.userData && data.userData.age && data.userData.gender) {
+            setUserData(data.userData);
+            setShowUserForm(false);
+          }
+          
+          if (data.answers) {
+            const loadedAnswers: Record<string, SymptomAnswer> = {};
+            data.answers.forEach((a: { symptomId: string; frequency: string; impactAreas: string[]; duration: string }) => {
+              loadedAnswers[a.symptomId] = {
+                frequency: a.frequency,
+                impactAreas: a.impactAreas,
+                duration: a.duration,
+              };
+            });
+            setAnswers(loadedAnswers);
+          }
+          
           if (data.completed) {
             setShowResults(true);
           }
@@ -107,6 +126,23 @@ export default function ADHDSurvey() {
       });
     } catch (error) {
       console.error('Failed to save:', error);
+    }
+    setIsSaving(false);
+  }, [sessionId]);
+
+  const saveUserData = useCallback(async (data: UserData) => {
+    setIsSaving(true);
+    try {
+      await fetch('/api/survey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, userData: data }),
+      });
+      setUserData(data);
+      setShowUserForm(false);
+      setShowWelcome(true);
+    } catch (error) {
+      console.error('Failed to save user data:', error);
     }
     setIsSaving(false);
   }, [sessionId]);
@@ -197,11 +233,31 @@ export default function ADHDSurvey() {
     }).length;
   };
 
-  // Get severity level based on percentage
-  const getSeverity = (percentage: number): 'low' | 'moderate' | 'high' | 'very_high' => {
-    if (percentage < 25) return 'low';
-    if (percentage < 50) return 'moderate';
-    if (percentage < 75) return 'high';
+  // Get severity level based on percentage and user data
+  const getSeverity = (percentage: number, category: string, userData?: UserData | null): 'low' | 'moderate' | 'high' | 'very_high' => {
+    let adjustedPercentage = percentage;
+    
+    // Adjust based on age and gender for ADHD diagnosis criteria
+    if (userData) {
+      const isAdult = userData.age >= 17;
+      const isFemale = userData.gender === 'female';
+      
+      // Adults need fewer symptoms than children for diagnosis
+      if (isAdult && (category === 'total' || category === 'inattentive' || category === 'hyperactive')) {
+        // For adults, moderate scores might be more significant
+        adjustedPercentage = Math.min(100, percentage * 1.2);
+      }
+      
+      // Gender differences in presentation
+      if (isFemale && (category === 'inattentive' || category === 'total')) {
+        // Women often present with more inattentive symptoms
+        adjustedPercentage = Math.min(100, percentage * 1.1);
+      }
+    }
+    
+    if (adjustedPercentage < 25) return 'low';
+    if (adjustedPercentage < 50) return 'moderate';
+    if (adjustedPercentage < 75) return 'high';
     return 'very_high';
   };
 
@@ -225,6 +281,16 @@ export default function ADHDSurvey() {
 
   // Calculate results with scores
   const calculateResults = (): Record<string, CategoryResult> => {
+    // عرض البيانات في console للمطور
+    if (userData) {
+      console.log('=== بيانات المستخدم ===');
+      console.log('الاسم:', userData.name || 'غير محدد');
+      console.log('العنوان:', userData.address || 'غير محدد');
+      console.log('العمر:', userData.age);
+      console.log('الجنس:', userData.gender);
+      console.log('===================');
+    }
+
     const results: Record<string, CategoryResult> = {
       inattentive: { total: 0, maxPossible: getMaxScoreForCategory('inattentive'), percentage: 0, symptoms: [], severity: 'low' },
       hyperactive: { total: 0, maxPossible: getMaxScoreForCategory('hyperactive'), percentage: 0, symptoms: [], severity: 'low' },
@@ -250,7 +316,7 @@ export default function ADHDSurvey() {
     Object.keys(results).forEach(key => {
       const cat = key as keyof typeof results;
       results[cat].percentage = Math.round((results[cat].total / results[cat].maxPossible) * 100);
-      results[cat].severity = getSeverity(results[cat].percentage);
+      results[cat].severity = getSeverity(results[cat].percentage, cat, userData);
     });
 
     return results;
@@ -277,6 +343,89 @@ export default function ADHDSurvey() {
       </div>
     );
   }
+
+  if (showUserForm) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 flex flex-col" dir="rtl">
+        <header className="bg-white border-b shadow-sm">
+          <div className="max-w-2xl mx-auto px-4 py-6">
+            <div className="flex items-center justify-center gap-3">
+              <Brain className="w-8 h-8 text-primary" />
+              <div className="text-center">
+                <h1 className="text-2xl font-bold">استبيان ADHD</h1>
+                <p className="text-sm text-muted-foreground">يرجى إدخال بياناتك الشخصية</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 max-w-2xl mx-auto px-4 py-8 w-full">
+          <Card>
+            <CardHeader>
+              <CardTitle>البيانات الشخصية</CardTitle>
+              <CardDescription>
+                هذه البيانات مطلوبة لتحليل نتائج الاستبيان بشكل دقيق
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <UserDataForm onSubmit={saveUserData} isSaving={isSaving} />
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // Welcome screen after registration, before survey
+  if (showWelcome) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100" dir="rtl">
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -40 }}
+          transition={{ duration: 0.7 }}
+          className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center"
+        >
+          <motion.div
+            initial={{ scale: 0.7, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+            className="flex justify-center mb-4"
+          >
+            <Brain className="w-16 h-16 text-primary animate-bounce" />
+          </motion.div>
+          <motion.h2
+            className="text-3xl font-bold mb-2"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            {userData?.name ? `مرحباً ${userData.name}!` : 'مرحباً بك!'}
+          </motion.h2>
+          <motion.p
+            className="text-lg text-muted-foreground mb-6"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            {userData?.name ? 'يسعدنا انضمامك معنا. اضغط على زر البدء للانتقال إلى الاستبيان.' : 'يسعدنا انضمامك معنا. اضغط على زر البدء للانتقال إلى الاستبيان.'}
+          </motion.p>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.6 }}
+          >
+            <Button size="lg" className="text-lg px-8 py-2" onClick={() => setShowWelcome(false)}>
+              ابدأ الاستبيان
+            </Button>
+          </motion.div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // تم حذف صفحة بيانات المستخدم بعد التسجيل، سيتم الانتقال مباشرة إلى الاستبيان
 
   if (showResults) {
     const results = calculateResults();
@@ -305,6 +454,28 @@ export default function ADHDSurvey() {
         </header>
 
         <main className="flex-1 max-w-4xl mx-auto px-4 py-8 w-full">
+          {/* Success Message */}
+          <Card className="mb-6">
+            <CardHeader className="text-center">
+              <div className="p-3 rounded-full bg-green-100 mx-auto mb-4">
+                <Check className="w-8 h-8 text-green-600" />
+              </div>
+              <CardTitle className="text-2xl text-green-700">تم تسليم الاستبيان بنجاح!</CardTitle>
+              <CardDescription className="text-lg">
+                شكراً لك على إكمال استبيان ADHD
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-center">
+              <p className="text-muted-foreground mb-4">
+                تم حفظ إجاباتك بنجاح. يرجى مراجعة الطبيب أو المتخصص لمناقشة النتائج وتحديد الخطوات التالية.
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-blue-800 font-medium">📅 الخطوة التالية:</p>
+                <p className="text-blue-700">احضر هذه الصفحة معك عند زيارة الطبيب لمراجعة النتائج</p>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Total Score Card */}
           <Card className="mb-6">
             <CardHeader className="text-center">
@@ -352,8 +523,8 @@ export default function ADHDSurvey() {
               </div>
 
               <div className="text-center">
-                <Badge className={`text-base px-4 py-2 ${getSeverityColor(getSeverity(totalPercentage))}`}>
-                  شدة الأعراض: {getSeverityLabel(getSeverity(totalPercentage))}
+                <Badge className={`text-base px-4 py-2 ${getSeverityColor(getSeverity(totalPercentage, 'total', userData))}`}>
+                  شدة الأعراض: {getSeverityLabel(getSeverity(totalPercentage, 'total', userData))}
                 </Badge>
               </div>
             </CardContent>
@@ -787,5 +958,108 @@ export default function ADHDSurvey() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function UserDataForm({ onSubmit, isSaving }: { onSubmit: (data: UserData) => void; isSaving: boolean }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    address: '',
+    age: '',
+    gender: '' as 'male' | 'female' | '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.age || isNaN(Number(formData.age)) || Number(formData.age) < 1 || Number(formData.age) > 120) {
+      newErrors.age = 'العمر مطلوب ويجب أن يكون رقماً صحيحاً بين 1 و 120';
+    }
+
+    if (!formData.gender || !['male', 'female'].includes(formData.gender)) {
+      newErrors.gender = 'النوع مطلوب ويجب أن يكون ذكر أو أنثى فقط';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+    
+    onSubmit({
+      name: formData.name.trim() || undefined,
+      address: formData.address.trim() || undefined,
+      age: Number(formData.age),
+      gender: formData.gender as 'male' | 'female',
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="space-y-2">
+        <Label htmlFor="name">الاسم الكامل</Label>
+        <Input
+          id="name"
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+          placeholder="أدخل اسمك الكامل"
+          className={errors.name ? 'border-red-500' : ''}
+        />
+        {errors.name && <p className="text-sm text-red-500">{errors.name}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="address">العنوان (اختياري)</Label>
+        <Input
+          id="address"
+          type="text"
+          value={formData.address}
+          onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+          placeholder="أدخل عنوانك"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="age">العمر <span className="text-red-500">*</span></Label>
+        <Input
+          id="age"
+          type="number"
+          min="1"
+          max="120"
+          value={formData.age}
+          onChange={(e) => setFormData(prev => ({ ...prev, age: e.target.value }))}
+          placeholder="أدخل عمرك"
+          className={errors.age ? 'border-red-500' : ''}
+        />
+        {errors.age && <p className="text-sm text-red-500">{errors.age}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label>النوع *</Label>
+        <RadioGroup
+          value={formData.gender}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, gender: value as 'male' | 'female' }))}
+        >
+          <div className="flex items-center space-x-2 space-x-reverse">
+            <RadioGroupItem value="male" id="male" />
+            <Label htmlFor="male">ذكر</Label>
+          </div>
+          <div className="flex items-center space-x-2 space-x-reverse">
+            <RadioGroupItem value="female" id="female" />
+            <Label htmlFor="female">أنثى</Label>
+          </div>
+        </RadioGroup>
+        {errors.gender && <p className="text-sm text-red-500">{errors.gender}</p>}
+      </div>
+
+      <Button type="submit" className="w-full" disabled={isSaving}>
+        {isSaving ? 'جاري الحفظ...' : 'متابعة للاستبيان'}
+      </Button>
+    </form>
   );
 }

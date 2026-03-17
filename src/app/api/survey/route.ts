@@ -4,10 +4,20 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { sessionId, answers, completed } = body;
+    const { sessionId, answers, completed, userData } = body;
 
     if (!sessionId) {
       return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
+    }
+
+    // Validate userData
+    if (userData) {
+      if (!userData.age || typeof userData.age !== 'number' || userData.age < 1 || userData.age > 120) {
+        return NextResponse.json({ error: 'Invalid age. Age must be a number between 1 and 120.' }, { status: 400 });
+      }
+      if (!['male', 'female'].includes(userData.gender)) {
+        return NextResponse.json({ error: 'Invalid gender. Gender must be either "male" or "female".' }, { status: 400 });
+      }
     }
 
     // Create or update survey response
@@ -19,13 +29,27 @@ export async function POST(request: Request) {
     if (existingSurvey) {
       survey = await db.surveyResponse.update({
         where: { sessionId },
-        data: { completed: completed ?? false },
+        data: { 
+          completed: completed ?? false,
+          ...(userData && {
+            name: userData.name,
+            address: userData.address,
+            age: userData.age,
+            gender: userData.gender,
+          }),
+        },
       });
     } else {
       survey = await db.surveyResponse.create({
         data: {
           sessionId,
           completed: completed ?? false,
+          ...(userData && {
+            name: userData.name,
+            address: userData.address,
+            age: userData.age,
+            gender: userData.gender,
+          }),
         },
       });
     }
@@ -103,6 +127,12 @@ export async function GET(request: Request) {
       exists: true,
       completed: survey.completed,
       answers,
+      userData: {
+        name: survey.name,
+        address: survey.address,
+        age: survey.age,
+        gender: survey.gender,
+      },
     });
   } catch (error) {
     console.error('Survey fetch error:', error);
